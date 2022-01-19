@@ -36,7 +36,7 @@ class VioCore:
             print("VEL STATES: ", vel_state)
             print("ATT STATES: ",attitude_state)
 
-            exit()
+            #exit()
 
             # Run vo+imu
 

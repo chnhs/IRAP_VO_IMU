@@ -1,5 +1,7 @@
 from cmath import pi
+from matplotlib.pyplot import findobj
 import numpy as np
+import utils.transformations as TF
 
 G = 9.80665 #m/s^2
 
@@ -19,41 +21,63 @@ class IMU:
         initial_state[7],
         initial_state[8]]).reshape(3,1)        
         self.dt = dt
+        '''Measurement interval dt = (t)-(t-1)
+        '''
         
 
     def update(self, data):
-        '''Inertial Navigation in Earth-fixed frame
+        '''Inertial Navigation in Navigation-frame (n-frame): {North,Eeast,Down}
+           position: {lat, long, height}_b
+           velocity: {vx, vy, vz}_eb^n
+           attitude: Cb^n
         '''
         # Get IMU measurements, here in b-frame
         fibb = np.array([data.ax, data.ay, data.az]).reshape(3,1)
         wibb = np.array([data.wx, data.wy, data.wz]).reshape(3,1)
 
-        # Initial alignment
+        # Initial alignment, attitude is in _nb
         if self.initial_pos_vel_alignment_ == False:
             self.position_velocity_init(self.pos_state, self.vel_state)
-        
+
         if self.initial_attitude_alignment_ == False:
             self.attitude_init(self.attitude_state, wibb, fibb)
-        
-        print("Initialization P: ", self.pos_state)
-        print("Initialization V: ", self.vel_state)
-        print("Initialization A: ", self.attitude_state)
+
+        # Check aligment
+        # print("Initialization P: ", self.pos_state)
+        # print("Initialization V: ", self.vel_state)
+        # print("Initialization A: ", self.attitude_state)
         
         # Conversions
-        # Get initial Cbe from previous attitude state
-
+        # Get initial C from previous or initialized attitude state
+        Cbn = TF.Cbn_from_euler(self.attitude_state[0],self.attitude_state[1],self.attitude_state[2])
+        # Check Cbn convertion
+        # One way to check: Cbn * Cnb = I
+        #print("Initial Cbn: ", Cbn)
 
         # Correction of raw data (calibration)
 
         # Attitude update
+
         # attitude change update
-        self.attitude_state = self.attitude_state + self.euler_rate(wibb)
+        #self.attitude_state = self.attitude_state + self.euler_rate(wibb)
+
+        # Integration
+        new_Cbn = self.attitude_update(self.pos_state, self.vel_state, wibb, Cbn)
+
+        print("CBN: ", new_Cbn)
 
         # Transformation of specific force to navigation frame
-        
+        fibn = self.specific_force_transformation(fibb, Cbn, new_Cbn)
+
+
         # Velocity update
         # Acceleration change
-        self.vel_state = self.vel_state + self.acceleration_rate(fibb,wibb)
+        #self.vel_state = self.vel_state + self.acceleration_rate(fibb,wibb)
+        new_vel = self.velocity_update(fibn, self.vel_state, self.pos_state)
+
+
+        print("VEL: ", new_vel)
+        exit()
 
         # Position and velocity update
         self.pos_state = self.pos_state + self.vel_state*self.dt
@@ -83,7 +107,8 @@ class IMU:
     #def integrate_rates(self, )
 
     def position_velocity_init(self, pos0, vel0):
-        '''The INS position and velocity must be initialized using external information
+        '''The INS position and velocity must be initialized using external information.
+            Results are in local-frame: pos {lat,long,h} vel {vx,vy,vz}_eb^n.
         '''
         if np.all(self.pos_state) == 0:
             pos0[0] = self.pos_state[0]
@@ -106,11 +131,16 @@ class IMU:
             vel0[1] = 0.0
             vel0[2] = 0.0
 
+            # If vel from GPS, convert it from _eb^e to _eb^n using equation (5.49)
+            vel0 = np.matmul(TF.Cen_rotation(pos0[0,0], pos0[1,0]), vel0)
+
+
         self.initial_pos_vel_alignment_ = True
         
 
     def attitude_init(self, attitude_state0, wibb, fibb):
-        '''The INS position and velocity must be initialized using external information
+        '''Attitude is initialized using IMU measurements. The attitude after is in _nb.
+           Reminder: The INS position and velocity must be initialized using external information.
         '''
         if np.all(self.attitude_state) == 0:
             # Intialize roll and pitch with levelling
@@ -144,5 +174,46 @@ class IMU:
         sin_yaw = -wibb[1]*np.cos(roll) + wibb[2]*np.sin(roll)
 
         return np.arctan2(sin_yaw, cos_yaw)
+
+
+    def attitude_update(self, pos, vel, wibb, prev_Cbn):
+        '''Update Cbn using angular-rates, position_ebn, and velocity_ebn{NED} solution
+        '''
+        Skew_ien = TF.we * np.array([ 0, np.sin(pos[0,0]), 0,
+                                      -np.sin(pos[0,0]), 0, -np.cos(pos[0,0]),
+                                      0,      np.cos(pos[0,0]), 0 ]).reshape(3,3)
+        w_enn = np.array([ vel[1,0]/(TF.N_geo(pos[0,0])+pos[2,0]), 
+                          -vel[0,0]/(TF.M_geo(pos[0,0])+pos[2,0]),
+                          -vel[1,0]*np.tan(pos[0,0])/(TF.N_geo(pos[0,0])+pos[2,0]) ]).reshape(3,1)
+        
+        # Cbn integration, page 178 Groves(2013) *****************DOUBLE CHECK THE MATRIX MULTIPLICATION ************************************************
+        return (np.matmul(prev_Cbn,(np.identity(3) + (TF.vec_to_skew(wibb))*self.dt)) - np.matmul((Skew_ien + (TF.vec_to_skew(w_enn))),prev_Cbn*self.dt))
+
+    def specific_force_transformation(self, fibb, prev_Cbn, Cbn):
+        '''Transform specific force (fibb) into the same frame of integration (fibn)
+        '''
+        
+        return (0.5*(np.matmul((prev_Cbn+Cbn), fibb)))
+
+    def velocity_update(self, fibn, prev_vebn, pos):
+        '''Update vebn using previous velocity, specific force transformed
+        '''
+
+        Skew_ien = TF.we * np.array([ 0, np.sin(pos[0,0]), 0,
+                                      -np.sin(pos[0,0]), 0, -np.cos(pos[0,0]),
+                                      0,      np.cos(pos[0,0]), 0 ]).reshape(3,3)
+        w_enn = np.array([ prev_vebn[1,0]/(TF.N_geo(pos[0,0])+pos[2,0]), 
+                          -prev_vebn[0,0]/(TF.M_geo(pos[0,0])+pos[2,0]),
+                          -prev_vebn[1,0]*np.tan(pos[0,0])/(TF.N_geo(pos[0,0])+pos[2,0]) ]).reshape(3,1)
+
+ 
+        # Check if vel is really in vebn, if it is from GPS initialization
+        return (prev_vebn + fibn*self.dt + (TF.gravity_to_local(pos[0,0], pos[2,0]) - np.matmul((TF.vec_to_skew(w_enn) + 2*Skew_ien ),prev_vebn) )*self.dt)
+    
+    def position_update(self, prev_pos, prev_vel, current_vel):
+        '''Update position {lat, long, h} using current velocity, previous velocity and position
+        '''
+        pass
+        return new_pos
 
 
