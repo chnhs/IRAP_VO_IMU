@@ -214,6 +214,7 @@ class IMU:
         '''Update position {lat, long, h} using current velocity, previous velocity and position
         '''
         print("STARTING POSITION UPDATE")
+        print("STARTING POSITION UPDATE 2")
         return new_pos
 
 
