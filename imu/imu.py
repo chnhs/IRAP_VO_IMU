@@ -213,7 +213,7 @@ class IMU:
     def position_update(self, prev_pos, prev_vel, current_vel):
         '''Update position {lat, long, h} using current velocity, previous velocity and position
         '''
-        pass
+        print("STARTING POSITION UPDATE")
         return new_pos
 
 
