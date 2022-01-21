@@ -39,12 +39,14 @@ mu = 3.986004418E14;
 '''
 
 def N_geo(lat):
-    """Radius of curvature of the ellipsoid in the prime vertical plane in (m)
+    """Radius of curvature of the ellipsoid in the prime vertical plane in (m).
+       Groves(2013) uses RE
     """
     return a_geo / np.sqrt(1 - e2_geo*(np.sin(lat)*np.sin(lat)))
 
 def M_geo(lat):
-    """Radius of curvature of the ellipsoid in the prime vertical plane in (m)
+    """Meridian radius of curvature (m)
+       Groves(2013) uses RN
     """
     return a_geo*(1 - e2_geo) / (1 - e2_geo*(np.sin(lat))**2)**(3/2) 
 

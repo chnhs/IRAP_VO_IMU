@@ -62,13 +62,12 @@ class IMU:
         #self.attitude_state = self.attitude_state + self.euler_rate(wibb)
 
         # Integration
-        new_Cbn = self.attitude_update(self.pos_state, self.vel_state, wibb, Cbn)
 
-        print("CBN: ", new_Cbn)
+        # Attitude update
+        new_Cbn = self.attitude_update(self.pos_state, self.vel_state, wibb, Cbn)
 
         # Transformation of specific force to navigation frame
         fibn = self.specific_force_transformation(fibb, Cbn, new_Cbn)
-
 
         # Velocity update
         # Acceleration change
@@ -76,11 +75,19 @@ class IMU:
         new_vel = self.velocity_update(fibn, self.vel_state, self.pos_state)
 
 
-        print("VEL: ", new_vel)
-        exit()
-
         # Position and velocity update
-        self.pos_state = self.pos_state + self.vel_state*self.dt
+        #self.pos_state = self.pos_state + self.vel_state*self.dt
+        new_pos = self.position_update(self.pos_state, self.vel_state, new_vel)
+
+        #print("POS: ", new_pos)
+
+        self.pos_state = new_pos
+        self.vel_state = new_vel
+        self.attitude_state = TF.Cbn_to_euler(new_Cbn)
+        
+        #exit()
+
+
 
         # Finally output navigation
         return self.pos_state, self.vel_state, self.attitude_state
@@ -213,8 +220,10 @@ class IMU:
     def position_update(self, prev_pos, prev_vel, current_vel):
         '''Update position {lat, long, h} using current velocity, previous velocity and position
         '''
-        print("STARTING POSITION UPDATE")
+        height_new = prev_pos[2,0] - (self.dt/2) * (prev_vel[2,0] + prev_vel[2,0])
+        lat_new =   prev_pos[0,0] + (self.dt/2) * ( (prev_vel[0,0] / (TF.M_geo(prev_pos[0,0]) + prev_pos[2,0]) ) + (current_vel[0,0]/(TF.M_geo(prev_pos[0,0])+height_new) ) )
+        long_new =  prev_pos[1,0] + (self.dt/2) * ( (prev_vel[1,0] / (TF.N_geo(prev_pos[0,0]) + prev_pos[2,0])*np.cos(prev_pos[0,0]) ) + (current_vel[1,0] / (TF.N_geo(lat_new) + height_new)*np.cos(lat_new) ) )
         
-        return new_pos
+        return np.array([lat_new,long_new,height_new]).reshape(3,1)
 
 
